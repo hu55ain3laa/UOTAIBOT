@@ -1,76 +1,145 @@
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from sqlmodel import Session, select
+from sqlmodel import Session, select, create_engine
 from models import User, Assignment
-from utils import get_or_create_user, translate_day_name
-from config import ADMIN_PASSWORD, DATABASE_URL, GROUP_CHAT_ID
+from utils import get_or_create_user, translate_day_name, handle_error
+from config import ADMIN_PASSWORD, DATABASE_URL, API_ID, API_HASH, BOT_TOKEN
 from datetime import datetime, timedelta
 import logging
-from sqlmodel import create_engine
+from text_constants import *
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 engine = create_engine(DATABASE_URL)
 
-# Handler for the /start command
-@Client.on_message(filters.command("start"))
-async def start_command(client, message):
+def is_admin(user_id: int) -> bool:
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.user_id == user_id)).first()
+        return user.is_admin if user else False
+
+async def send_message_with_error_handling(chat_id: int, text: str, reply_markup=None):
+    try:
+        await app.send_message(chat_id, text, reply_markup=reply_markup)
+    except Exception as e:
+        await handle_error(app, "send_message", e, chat_id)
+
+@app.on_message(filters.command("start"))
+async def start_command(_, message):
     try:
         user = get_or_create_user(message.from_user.id, message.from_user.username or "")
-        if user.is_admin:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("إضافة واجب", callback_data="add_homework"),
-                 InlineKeyboardButton("إضافة مهمة", callback_data="add_assignment")],
-                [InlineKeyboardButton("عرض الأسبوع القادم", callback_data="view_next_week")],
-                [InlineKeyboardButton("تعديل مهمة", callback_data="edit_assignment"),
-                 InlineKeyboardButton("حذف مهمة", callback_data="delete_assignment")],
-                [InlineKeyboardButton("تعديل واجب", callback_data="edit_homework"),
-                 InlineKeyboardButton("حذف واجب", callback_data="delete_homework")]
-            ])
-            await message.reply_text("مرحبًا ، أي شيء تريد القيام به؟", reply_markup=keyboard)
-        else:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("عرض الأسبوع القادم", callback_data="view_next_week")]
-            ])
-            await message.reply_text("مرحبًا! إليك ما يمكنك فعله:", reply_markup=keyboard)
+        keyboard = InlineKeyboardMarkup(ADMIN_KEYBOARD if user.is_admin else USER_KEYBOARD)
+        text = START_MESSAGE if user.is_admin else USER_START_MESSAGE
+        await send_message_with_error_handling(message.chat.id, text, keyboard)
     except Exception as e:
-        logging.error(f"Error in start_command: {e}")
-        await message.reply_text("حدث خطأ. يرجى المحاولة مرة أخرى لاحقًا.")
+        await handle_error(app, "start_command", e, message.chat.id)
 
-# Handler for adding homework/assignment
-@Client.on_callback_query(filters.regex('^add_(homework|assignment)$'))
-async def add_task(client, callback_query):
-    user = get_or_create_user(callback_query.from_user.id, callback_query.from_user.username or "")
-    if not user.is_admin:
-        await callback_query.answer("ليس لديك إذن لإضافة مهام.", show_alert=True)
+@app.on_message(filters.command("make_admin"))
+async def make_admin(_, message):
+    if not is_admin(message.from_user.id):
+        await send_message_with_error_handling(message.chat.id, ADMIN_ONLY_COMMAND)
+        return
+
+    if not message.reply_to_message:
+        await send_message_with_error_handling(message.chat.id, MAKE_ADMIN_REPLY_REQUIRED)
+        return
+
+    try:
+        target_user_id = message.reply_to_message.from_user.id
+        target_username = message.reply_to_message.from_user.username or ""
+        with Session(engine) as session:
+            target_user = get_or_create_user(target_user_id, target_username)
+            target_user.is_admin = True
+            session.add(target_user)
+            session.commit()
+        await send_message_with_error_handling(message.chat.id, MAKE_ADMIN_SUCCESS.format(target_username=target_username))
+    except Exception as e:
+        await handle_error(app, "make_admin", e, message.chat.id)
+
+@app.on_message(filters.command("become_admin"))
+async def become_admin(_, message):
+    try:
+        command_args = message.text.split()
+        if len(command_args) < 2:
+            await send_message_with_error_handling(message.chat.id, PROVIDE_ADMIN_PASSWORD)
+            return
+
+        provided_password = command_args[1]
+
+        if provided_password == ADMIN_PASSWORD:
+            user = get_or_create_user(message.from_user.id, message.from_user.username or "")
+            user.is_admin = True
+            with Session(engine) as session:
+                session.add(user)
+                session.commit()
+            await send_message_with_error_handling(message.chat.id, ADMIN_PASSWORD_SUCCESS)
+        else:
+            await send_message_with_error_handling(message.chat.id, ADMIN_PASSWORD_FAIL)
+    except Exception as e:
+        await handle_error(app, "become_admin", e, message.chat.id)
+
+@app.on_callback_query(filters.regex('^add_(homework|assignment)$'))
+async def add_task(_, callback_query):
+    if not is_admin(callback_query.from_user.id):
+        await callback_query.answer(NO_PERMISSION_MESSAGE, show_alert=True)
         return
 
     task_type = "واجب" if callback_query.data == "add_homework" else "مهمة"
-    await callback_query.message.reply_text(f"الرجاء إدخال تفاصيل {task_type} بالتنسيق التالي:\n"
-                                            f"العنوان | الوصف | تاريخ الاستحقاق (YYYY-MM-DD)\n"
-                                            f"يمكنك أيضًا إرفاق صورة مع التفاصيل في التعليق.")
+    await send_message_with_error_handling(callback_query.message.chat.id, ADD_TASK_INSTRUCTIONS.format(task_type=task_type))
     
-    user.awaiting_task = task_type
     with Session(engine) as session:
+        user = session.exec(select(User).where(User.user_id == callback_query.from_user.id)).one()
+        user.awaiting_task = task_type
         session.add(user)
         session.commit()
 
-# Handler for receiving task details (text or photo)
-@Client.on_message((filters.text | filters.photo) & ~filters.command("start") & ~filters.command("make_admin") & ~filters.command("become_admin"))
-async def receive_task_details(client, message):
-    user = get_or_create_user(message.from_user.id, message.from_user.username or "")
-    if not hasattr(user, 'awaiting_task') or user.awaiting_task is None:
+@app.on_callback_query(filters.regex('^view_next_week$'))
+async def view_next_week(_, callback_query):
+    user_is_admin = is_admin(callback_query.from_user.id)
+    await send_next_week_tasks(callback_query.message.chat.id, user_is_admin)
+
+@app.on_callback_query(filters.regex('^(edit|delete)_(homework|assignment)_(\d+)$'))
+async def handle_task_action(_, callback_query):
+    if not is_admin(callback_query.from_user.id):
+        await callback_query.answer(NO_PERMISSION_DELETE, show_alert=True)
         return
 
-    try:
-        if message.photo:
-            if not message.caption:
-                await message.reply_text("الرجاء إرفاق التفاصيل في تعليق الصورة.")
-                return
-            details = message.caption.strip()
-            photo_id = message.photo.file_id
-        else:
-            details = message.text.strip()
-            photo_id = None
+    action, task_type, task_id = callback_query.data.split('_')
+    task_id = int(task_id)
 
+    with Session(engine) as session:
+        task = session.get(Assignment, task_id)
+        if not task:
+            await callback_query.answer(TASK_NOT_EXIST, show_alert=True)
+            return
+
+        if action == 'edit':
+            await send_message_with_error_handling(callback_query.message.chat.id, EDIT_TASK_INSTRUCTIONS.format(task_type=task_type))
+            user = session.exec(select(User).where(User.user_id == callback_query.from_user.id)).one()
+            user.awaiting_task = f"edit_{task_type}_{task_id}"
+            session.add(user)
+            session.commit()
+        else:  # delete
+            session.delete(task)
+            session.commit()
+            await callback_query.answer(TASK_DELETED_SUCCESS.format(task_type=task_type), show_alert=True)
+            await send_next_week_tasks(callback_query.message.chat.id, is_admin=True)
+
+@app.on_message(filters.text | filters.photo)
+async def handle_message(_, message):
+    user = get_or_create_user(message.from_user.id, message.from_user.username or "")
+    if user.awaiting_task:
+        if user.awaiting_task.startswith("edit_"):
+            await handle_edit_task(message, user)
+        else:
+            await handle_add_task(message, user)
+    else:
+        await send_message_with_error_handling(message.chat.id, DEFAULT_RESPONSE)
+
+async def handle_add_task(message, user):
+    try:
+        details, photo_id = get_task_details(message)
         title, description, due_date_str = [part.strip() for part in details.split('|')]
         due_date = datetime.strptime(due_date_str, "%Y-%m-%d")
         
@@ -85,25 +154,54 @@ async def receive_task_details(client, message):
             session.add(new_task)
             session.commit()
 
-        await message.reply_text(f"{user.awaiting_task} تمت إضافته بنجاح!")
+        await send_message_with_error_handling(message.chat.id, TASK_ADDED_SUCCESS.format(task_type=user.awaiting_task))
     except Exception as e:
-        await message.reply_text(f"خطأ في إضافة {user.awaiting_task.lower()}. يرجى التحقق من التنسيق والمحاولة مرة أخرى.")
+        await send_message_with_error_handling(message.chat.id, f"خطأ في إضافة {user.awaiting_task.lower()}. يرجى التحقق من التنسيق والمحاولة مرة أخرى.")
     finally:
-        user.awaiting_task = None
+        clear_awaiting_task(user)
+
+async def handle_edit_task(message, user):
+    _, task_type, task_id = user.awaiting_task.split("_")
+    try:
+        details, photo_id = get_task_details(message)
+        title, description, due_date_str = [part.strip() for part in details.split('|')]
+        due_date = datetime.strptime(due_date_str, "%Y-%m-%d")
+        
         with Session(engine) as session:
-            session.add(user)
-            session.commit()
+            task = session.get(Assignment, int(task_id))
+            if task:
+                task.title = title
+                task.description = description
+                task.due_date = due_date
+                if photo_id:
+                    task.photo_id = photo_id
+                session.add(task)
+                session.commit()
+                await send_message_with_error_handling(message.chat.id, TASK_UPDATED_SUCCESS.format(task_type=task_type))
+            else:
+                await send_message_with_error_handling(message.chat.id, TASK_NOT_EXIST)
+    except Exception as e:
+        await send_message_with_error_handling(message.chat.id, f"خطأ في تحديث {task_type}. يرجى التحقق من التنسيق والمحاولة مرة أخرى.")
+    finally:
+        clear_awaiting_task(user)
 
-# Handler for viewing next week's tasks
-@Client.on_callback_query(filters.regex('^view_next_week$'))
-async def view_next_week(client, callback_query):
-    await send_next_week_tasks(client, callback_query.message.chat.id, is_admin=callback_query.from_user.is_admin)
+def get_task_details(message):
+    if message.photo:
+        if not message.caption:
+            raise ValueError(MISSING_CAPTION)
+        return message.caption.strip(), message.photo.file_id
+    return message.text.strip(), None
 
-# Function to send next week's tasks
-async def send_next_week_tasks(client, chat_id, is_admin=False):
+def clear_awaiting_task(user):
+    with Session(engine) as session:
+        user.awaiting_task = None
+        session.add(user)
+        session.commit()
+
+async def send_next_week_tasks(chat_id, is_admin=False):
     today = datetime.now().date()
-    next_week_start = today + timedelta(days=(6 - today.weekday()))  # Start from Sunday
-    next_week_end = next_week_start + timedelta(days=4)  # End on Thursday
+    next_week_start = today + timedelta(days=(6 - today.weekday()))
+    next_week_end = next_week_start + timedelta(days=4)
 
     with Session(engine) as session:
         tasks = session.exec(select(Assignment).where(
@@ -111,87 +209,36 @@ async def send_next_week_tasks(client, chat_id, is_admin=False):
         ).order_by(Assignment.due_date)).all()
 
     if not tasks:
-        await client.send_message(chat_id, "لا توجد مهام للأسبوع القادم!")
+        await send_message_with_error_handling(chat_id, NO_TASKS_NEXT_WEEK)
         return
 
-    tasks_by_day = {}
+    message = "مهام الأسبوع القادم:\n\n"
     for task in tasks:
         day = task.due_date.strftime('%Y-%m-%d')
-        if day not in tasks_by_day:
-            tasks_by_day[day] = []
-        tasks_by_day[day].append(task)
+        day_name = translate_day_name(task.due_date.strftime('%A'))
+        task_type = "واجب" if task.is_homework else "مهمة"
+        message += f"{day_name} ({day}):\n"
+        message += f"{task_type}: {task.title}\n"
+        message += f"الوصف: {task.description}\n"
+        if task.photo_id:
+            message += "(تحتوي على صورة)\n"
+        message += "\n"
 
-    for day, day_tasks in tasks_by_day.items():
-        message = f"مهام يوم {translate_day_name(datetime.strptime(day, '%Y-%m-%d').strftime('%A'))} ({day}):\n\n"
-        for task in day_tasks:
-            task_type = "واجب" if task.is_homework else "مهمة"
-            message += f"{task_type}: {task.title}\n"
-            message += f"الوصف: {task.description}\n"
-            if task.photo_id:
-                message += "(تحتوي على صورة)\n"
-            message += "\n"
-
-            if is_admin:
-                edit_button = InlineKeyboardButton(f"تعديل {task_type}", callback_data=f"edit_{'homework' if task.is_homework else 'assignment'}_{task.id}")
-                delete_button = InlineKeyboardButton(f"حذف {task_type}", callback_data=f"delete_{'homework' if task.is_homework else 'assignment'}_{task.id}")
-                keyboard = InlineKeyboardMarkup([[edit_button, delete_button]])
-                await client.send_message(chat_id, message, reply_markup=keyboard)
-            else:
-                await client.send_message(chat_id, message)
-
-            if task.photo_id:
-                await client.send_photo(chat_id, task.photo_id)
-
-# Handler for editing task
-@Client.on_callback_query(filters.regex('^edit_(homework|assignment)_(\d+)$'))
-async def edit_task(client, callback_query):
-    user = get_or_create_user(callback_query.from_user.id, callback_query.from_user.username or "")
-    if not user.is_admin:
-        await callback_query.answer("ليس لديك إذن لتعديل المهام.", show_alert=True)
-        return
-
-    task_type = "واجب" if callback_query.data.startswith("edit_homework") else "مهمة"
-    task_id = int(callback_query.data.split('_')[-1])
-
-    with Session(engine) as session:
-        task = session.get(Assignment, task_id)
-        if not task:
-            await callback_query.answer("المهمة غير موجودة.", show_alert=True)
-            return
-
-        await callback_query.message.reply_text(f"الرجاء إدخال تفاصيل {task_type} الجديدة بالتنسيق التالي:\n"
-                                                f"العنوان | الوصف | تاريخ الاستحقاق (YYYY-MM-DD)\n"
-                                                f"يمكنك أيضًا إرفاق صورة جديدة مع التفاصيل في التعليق.")
+        if is_admin:
+            edit_button = InlineKeyboardButton(f"تعديل {task_type}", callback_data=f"edit_{'homework' if task.is_homework else 'assignment'}_{task.id}")
+            delete_button = InlineKeyboardButton(f"حذف {task_type}", callback_data=f"delete_{'homework' if task.is_homework else 'assignment'}_{task.id}")
+            keyboard = InlineKeyboardMarkup([[edit_button, delete_button]])
+            await send_message_with_error_handling(chat_id, message, keyboard)
+            message = ""  # Reset message for the next task
         
-        user.awaiting_task = f"edit_{task_type}_{task_id}"
-        session.add(user)
-        session.commit()
+    if not is_admin and message:
+        await send_message_with_error_handling(chat_id, message)
 
-# Handler for deleting task
-@Client.on_callback_query(filters.regex('^delete_(homework|assignment)_(\d+)$'))
-async def delete_task(client, callback_query):
-    user = get_or_create_user(callback_query.from_user.id, callback_query.from_user.username or "")
-    if not user.is_admin:
-        await callback_query.answer("ليس لديك إذن لحذف المهام.", show_alert=True)
-        return
+    for task in tasks:
+        if task.photo_id:
+            await app.send_photo(chat_id, task.photo_id)
 
-    task_type = "واجب" if callback_query.data.startswith("delete_homework") else "مهمة"
-    task_id = int(callback_query.data.split('_')[-1])
-
-    with Session(engine) as session:
-        task = session.get(Assignment, task_id)
-        if not task:
-            await callback_query.answer("المهمة غير موجودة.", show_alert=True)
-            return
-
-        session.delete(task)
-        session.commit()
-
-    await callback_query.answer(f"{task_type} تم حذفه بنجاح!", show_alert=True)
-    await send_next_week_tasks(client, callback_query.message.chat.id, is_admin=user.is_admin)
-
-# Function to send daily updates
-async def send_daily_update(client):
+async def send_daily_update():
     today = datetime.now().date()
     tomorrow = today + timedelta(days=1)
     
@@ -212,60 +259,21 @@ async def send_daily_update(client):
             message += "(تحتوي على صورة)\n"
         message += "\n"
 
-    await client.send_message(GROUP_CHAT_ID, message)
+    with Session(engine) as session:
+        admin_users = session.exec(select(User).where(User.is_admin == True)).all()
+        for admin_user in admin_users:
+            try:
+                await send_message_with_error_handling(admin_user.user_id, message)
+                for task in tasks:
+                    if task.photo_id:
+                        await app.send_photo(admin_user.user_id, task.photo_id)
+            except Exception as e:
+                logger.error(f"Failed to send daily update to admin {admin_user.user_id}: {str(e)}")
 
-    for task in tasks:
-        if task.photo_id:
-            await client.send_photo(GROUP_CHAT_ID, task.photo_id)
-
-# Handler for the /make_admin command (only for existing admins)
-@Client.on_message(filters.command("make_admin"))
-async def make_admin(client, message):
-    try:
-        user = get_or_create_user(message.from_user.id, message.from_user.username or "")
-        if user.is_admin:
-            if message.reply_to_message:
-                target_user_id = message.reply_to_message.from_user.id
-                target_username = message.reply_to_message.from_user.username or ""
-                with Session(engine) as session:
-                    target_user = get_or_create_user(target_user_id, target_username)
-                    target_user.is_admin = True
-                    session.add(target_user)
-                    session.commit()
-                await message.reply_text(f"المستخدم {target_username} أصبح الآن مشرفًا.")
-            else:
-                await message.reply_text("يرجى الرد على رسالة المستخدم لجعله مشرفًا.")
-        else:
-            await message.reply_text("عذرًا، فقط المشرفون يمكنهم استخدام هذا الأمر.")
-    except Exception as e:
-        logging.error(f"Error in make_admin: {e}")
-        await message.reply_text("حدث خطأ. يرجى المحاولة مرة أخرى لاحقًا.")
-
-# Handler for the /become_admin command
-@Client.on_message(filters.command("become_admin"))
-async def become_admin(client, message):
-    try:
-        command_args = message.text.split()
-        if len(command_args) < 2:
-            await message.reply_text("يرجى تقديم كلمة مرور المشرف.")
-            return
-
-        provided_password = command_args[1]
-
-        if provided_password == ADMIN_PASSWORD:
-            user = get_or_create_user(message.from_user.id, message.from_user.username or "")
-            user.is_admin = True
-            with Session(engine) as session:
-                session.add(user)
-                session.commit()
-            await message.reply_text("تهانينا! أنت الآن مشرف.")
-        else:
-            await message.reply_text("كلمة المرور غير صحيحة. لا يمكنك أن تصبح مشرفًا.")
-    except Exception as e:
-        logging.error(f"Error in become_admin: {e}")
-        await message.reply_text("حدث خطأ. يرجى المحاولة مرة أخرى لاحقًا.")
-
-@Client.on_message(filters.group)
-async def get_group_id(client, message):
-    print(f"Group ID: {message.chat.id}")
-    await message.reply(f"This group's ID is: {message.chat.id}")
+@app.on_message(filters.command("send_daily_update"))
+async def manual_send_daily_update(_, message):
+    if is_admin(message.from_user.id):
+        await send_daily_update()
+        await send_message_with_error_handling(message.chat.id, "Daily update sent to all admin users.")
+    else:
+        await send_message_with_error_handling(message.chat.id, ADMIN_ONLY_COMMAND)
