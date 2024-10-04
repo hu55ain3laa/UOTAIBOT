@@ -3,7 +3,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlmodel import Session, select, create_engine
 from models import User, Assignment
 from utils import get_or_create_user, translate_day_name, handle_error
-from config import ADMIN_PASSWORD, DATABASE_URL, API_ID, API_HASH, BOT_TOKEN
+from config import ADMIN_PASSWORD, DATABASE_URL, API_ID, API_HASH, BOT_TOKEN ,GROUP_CHAT_ID
 from datetime import datetime, timedelta
 import logging
 from text_constants import *
@@ -212,31 +212,30 @@ async def send_next_week_tasks(chat_id, is_admin=False):
         await send_message_with_error_handling(chat_id, NO_TASKS_NEXT_WEEK)
         return
 
-    message = "مهام الأسبوع القادم:\n\n"
     for task in tasks:
         day = task.due_date.strftime('%Y-%m-%d')
         day_name = translate_day_name(task.due_date.strftime('%A'))
         task_type = "واجب" if task.is_homework else "مهمة"
-        message += f"{day_name} ({day}):\n"
+        message = f"{day_name} ({day}):\n"
         message += f"{task_type}: {task.title}\n"
         message += f"الوصف: {task.description}\n"
-        if task.photo_id:
-            message += "(تحتوي على صورة)\n"
-        message += "\n"
 
-        if is_admin:
-            edit_button = InlineKeyboardButton(f"تعديل {task_type}", callback_data=f"edit_{'homework' if task.is_homework else 'assignment'}_{task.id}")
-            delete_button = InlineKeyboardButton(f"حذف {task_type}", callback_data=f"delete_{'homework' if task.is_homework else 'assignment'}_{task.id}")
-            keyboard = InlineKeyboardMarkup([[edit_button, delete_button]])
-            await send_message_with_error_handling(chat_id, message, keyboard)
-            message = ""  # Reset message for the next task
-        
-    if not is_admin and message:
-        await send_message_with_error_handling(chat_id, message)
-
-    for task in tasks:
         if task.photo_id:
-            await app.send_photo(chat_id, task.photo_id)
+            if is_admin:
+                edit_button = InlineKeyboardButton(f"تعديل {task_type}", callback_data=f"edit_{'homework' if task.is_homework else 'assignment'}_{task.id}")
+                delete_button = InlineKeyboardButton(f"حذف {task_type}", callback_data=f"delete_{'homework' if task.is_homework else 'assignment'}_{task.id}")
+                keyboard = InlineKeyboardMarkup([[edit_button, delete_button]])
+                await app.send_photo(chat_id, task.photo_id, caption=message, reply_markup=keyboard)
+            else:
+                await app.send_photo(chat_id, task.photo_id, caption=message)
+        else:
+            if is_admin:
+                edit_button = InlineKeyboardButton(f"تعديل {task_type}", callback_data=f"edit_{'homework' if task.is_homework else 'assignment'}_{task.id}")
+                delete_button = InlineKeyboardButton(f"حذف {task_type}", callback_data=f"delete_{'homework' if task.is_homework else 'assignment'}_{task.id}")
+                keyboard = InlineKeyboardMarkup([[edit_button, delete_button]])
+                await send_message_with_error_handling(chat_id, message, keyboard)
+            else:
+                await send_message_with_error_handling(chat_id, message)
 
 async def send_daily_update():
     today = datetime.now().date()
@@ -253,20 +252,29 @@ async def send_daily_update():
     message = f"مهام اليوم ({today.strftime('%Y-%m-%d')}):\n\n"
     for task in tasks:
         task_type = "واجب" if task.is_homework else "مهمة"
-        message += f"{task_type}: {task.title}\n"
-        message += f"الوصف: {task.description}\n"
+        task_message = f"{task_type}: {task.title}\n"
+        task_message += f"الوصف: {task.description}\n"
+
         if task.photo_id:
-            message += "(تحتوي على صورة)\n"
-        message += "\n"
+            task_message += "(تحتوي على صورة)\n"
+            await app.send_photo(GROUP_CHAT_ID, task.photo_id, caption=task_message)
+        else:
+            await send_message_with_error_handling(GROUP_CHAT_ID, task_message)
 
     with Session(engine) as session:
         admin_users = session.exec(select(User).where(User.is_admin == True)).all()
         for admin_user in admin_users:
             try:
-                await send_message_with_error_handling(admin_user.user_id, message)
                 for task in tasks:
+                    task_type = "واجب" if task.is_homework else "مهمة"
+                    task_message = f"{task_type}: {task.title}\n"
+                    task_message += f"الوصف: {task.description}\n"
+
                     if task.photo_id:
-                        await app.send_photo(admin_user.user_id, task.photo_id)
+                        task_message += "(تحتوي على صورة)\n"
+                        await app.send_photo(admin_user.user_id, task.photo_id, caption=task_message)
+                    else:
+                        await send_message_with_error_handling(admin_user.user_id, task_message)
             except Exception as e:
                 logger.error(f"Failed to send daily update to admin {admin_user.user_id}: {str(e)}")
 
