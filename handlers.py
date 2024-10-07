@@ -200,12 +200,19 @@ def clear_awaiting_task(user):
 
 async def send_next_week_tasks(chat_id, is_admin=False):
     today = datetime.now().date()
-    next_week_start = today + timedelta(days=(6 - today.weekday()))
-    next_week_end = next_week_start + timedelta(days=4)
+    
+    # Adjust for Sunday-Thursday week
+    days_until_sunday = (6 - today.weekday()) % 7
+    this_week_start = today - timedelta(days=today.weekday())
+    next_week_start = this_week_start + timedelta(days=7)
+    
+    this_week_end = this_week_start + timedelta(days=4)  # Thursday
+    next_week_end = next_week_start + timedelta(days=4)  # Next Thursday
 
     with Session(engine) as session:
         tasks = session.exec(select(Assignment).where(
-            Assignment.due_date.between(next_week_start, next_week_end)
+            (Assignment.due_date.between(today, this_week_end) & Assignment.is_homework) |
+            (Assignment.due_date.between(next_week_start, next_week_end))
         ).order_by(Assignment.due_date)).all()
 
     if not tasks:
@@ -216,7 +223,8 @@ async def send_next_week_tasks(chat_id, is_admin=False):
         day = task.due_date.strftime('%Y-%m-%d')
         day_name = translate_day_name(task.due_date.strftime('%A'))
         task_type = "واجب" if task.is_homework else "مهمة"
-        message = f"{day_name} ({day}):\n"
+        week_indicator = "هذا الأسبوع" if task.due_date < next_week_start else "الأسبوع القادم"
+        message = f"{day_name} ({day}) - {week_indicator}:\n"
         message += f"{task_type}: {task.title}\n"
         message += f"الوصف: {task.description}\n"
 
