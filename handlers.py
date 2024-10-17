@@ -220,10 +220,11 @@ async def send_next_week_tasks(chat_id, is_admin=False):
         return
 
     for task in tasks:
-        day = task.due_date.strftime('%Y-%m-%d')
-        day_name = translate_day_name(task.due_date.strftime('%A'))
+        task_date = task.due_date.date() if isinstance(task.due_date, datetime) else task.due_date
+        day = task_date.strftime('%Y-%m-%d')
+        day_name = translate_day_name(task_date.strftime('%A'))
         task_type = "واجب" if task.is_homework else "مهمة"
-        week_indicator = "هذا الأسبوع" if task.due_date < next_week_start else "الأسبوع القادم"
+        week_indicator = "هذا الأسبوع" if task_date < next_week_start else "الأسبوع القادم"
         message = f"{day_name} ({day}) - {week_indicator}:\n"
         message += f"{task_type}: {task.title}\n"
         message += f"الوصف: {task.description}\n"
