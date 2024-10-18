@@ -1,10 +1,11 @@
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime
+from sqlalchemy import BigInteger, Column
 
 class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    telegram_id: int = Field(unique=True, index=True)
+    telegram_id: int = Field(sa_column=Column(BigInteger, unique=True, index=True))
     is_admin: bool = Field(default=False)
     # Fields for lecture creation
     temp_subject_id: Optional[int] = None
@@ -16,9 +17,7 @@ class User(SQLModel, table=True):
     assignment_title: Optional[str] = None
     assignment_description: Optional[str] = None
     assignment_due_date: Optional[datetime] = None
-
     temp_assignment_id: Optional[int] = None
-
     photo_ids: Optional[str] = None
 
 class Subject(SQLModel, table=True):

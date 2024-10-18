@@ -6,13 +6,9 @@ from handlers import register_handlers
 from utils import send_message_once
 
 # Load environment variables
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set in environment variables")
 
 # Initialize bot
-bot = TeleBot(BOT_TOKEN)
+bot = TeleBot("7426713797:AAE1CQOOlf40Ff47jtXO4VAtX7umfTTSH38")
 
 # Initialize database
 init_db()
