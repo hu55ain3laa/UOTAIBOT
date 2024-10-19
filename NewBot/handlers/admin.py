@@ -4,14 +4,16 @@ from sqlmodel import Session, select
 from models import User
 from database import engine
 from utils import is_admin
+from telebot.types import Message
 import os
+from telebot import TeleBot
 from dotenv import load_dotenv
 from texts import (
     ADMIN_MENU, LIST_USERS, ADD_ADMIN, REMOVE_ADMIN, NO_ADMIN_PERMISSION,
     MAKE_ADMIN_USAGE, INCORRECT_PASSWORD, ALREADY_ADMIN, NOW_ADMIN,
-    ADDED_AS_ADMIN, NO_PERMISSION_LIST_USERS, USER_LIST_HEADER,
+    ADDED_AS_ADMIN, NO_PERMISSION_LIST_USERS, TELEGRAM_API_ERROR, USER_LIST_HEADER,
     USER_INFO, NO_PERMISSION_MODIFY_ADMIN, ENTER_TELEGRAM_ID,
-    INVALID_TELEGRAM_ID, USER_NOT_FOUND, ADMIN_STATUS_CHANGED
+    INVALID_TELEGRAM_ID, USER_NOT_FOUND, ADMIN_STATUS_CHANGED, USERNAME_RESULT, USERNAME_USAGE
 )
 
 load_dotenv()
@@ -99,3 +101,38 @@ def process_admin_action(message, action, send_message_once):
 
     status = "كـ" if action == "إضافة" else "من"
     send_message_once(message.chat.id, ADMIN_STATUS_CHANGED.format(action=action, target_id=target_id, status=status))
+
+def get_username_by_id(message: Message, send_message_once, bot: TeleBot):
+    if not is_admin(message.from_user.id):
+        send_message_once(message.chat.id, NO_ADMIN_PERMISSION)
+        return
+
+    command_parts = message.text.split()
+    if len(command_parts) != 2:
+        send_message_once(message.chat.id, USERNAME_USAGE)
+        return
+
+    try:
+        target_id = int(command_parts[1])
+    except ValueError:
+        send_message_once(message.chat.id, USERNAME_USAGE)
+        return
+
+    try:
+        chat = bot.get_chat(target_id)
+        username = chat.username or "لا يوجد اسم مستخدم"
+        first_name = chat.first_name or "لا يوجد اسم أول"
+        last_name = chat.last_name or "لا يوجد اسم أخير"
+        
+        response = USERNAME_RESULT.format(
+            id=target_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name
+        )
+        send_message_once(message.chat.id, response)
+    except Exception as e:
+        if "user not found" in str(e).lower():
+            send_message_once(message.chat.id, USER_NOT_FOUND)
+        else:
+            send_message_once(message.chat.id, TELEGRAM_API_ERROR)

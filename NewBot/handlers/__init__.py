@@ -1,7 +1,7 @@
 # __init__.py
 from telebot import TeleBot
 from telebot.types import Message, CallbackQuery
-from . import general, lectures, assignments, subjects, admin, pdf_utils
+from . import general, lectures, assignments, subjects, admin, pdf_utils, groups
 from utils import prevent_duplicate_message, prevent_duplicate_callback
 from texts import FINISH_PDF_CREATION, CANCEL_PDF_CREATION
 
@@ -11,6 +11,11 @@ def register_handlers(bot: TeleBot, send_message_once):
     @prevent_duplicate_message
     def start(message: Message):
         general.start(message, send_message_once)
+    
+    @bot.message_handler(commands=['username'])
+    @prevent_duplicate_message
+    def username_handler(message: Message):
+        admin.get_username_by_id(message, send_message_once, bot)
 
     # Lecture handlers
     @bot.message_handler(func=lambda message: message.text == "📚 المحاضرات")
@@ -150,7 +155,7 @@ def register_handlers(bot: TeleBot, send_message_once):
     def delete_subject_confirm(call: CallbackQuery):
         subjects.delete_subject_confirm(call, send_message_once)
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete_"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete1_"))
     @prevent_duplicate_callback
     def delete_subject(call: CallbackQuery):
         subjects.delete_subject(call, send_message_once)
@@ -200,6 +205,111 @@ def register_handlers(bot: TeleBot, send_message_once):
     @bot.message_handler(func=lambda message: message.text in [FINISH_PDF_CREATION, CANCEL_PDF_CREATION])
     def pdf_creation_control_handler(message: Message):
         pdf_utils.handle_photo_for_pdf(message, bot, send_message_once)
+# Group handlers
+    @bot.message_handler(func=lambda message: message.text == "👥 المجموعات")
+    @prevent_duplicate_message
+    def groups_menu_handler(message: Message):
+        groups.groups_menu(message, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "create_group")
+    @prevent_duplicate_callback
+    def create_group_handler(call: CallbackQuery):
+        groups.create_group_prompt(call, send_message_once, bot)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "view_groups")
+    @prevent_duplicate_callback
+    def view_groups_handler(call: CallbackQuery):
+        groups.view_groups(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "add_user_to_group")
+    @prevent_duplicate_callback
+    def add_user_to_group_handler(call: CallbackQuery):
+        groups.add_user_to_group_prompt(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("select_group_"))
+    @prevent_duplicate_callback
+    def select_group_handler(call: CallbackQuery):
+        groups.add_user_to_group(call, send_message_once, bot)
+        
+    @bot.callback_query_handler(func=lambda call: call.data == "edit_group")
+    @prevent_duplicate_callback
+    def edit_group_prompt_handler(call: CallbackQuery):
+        groups.edit_group_prompt(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("edit_group_"))
+    @prevent_duplicate_callback
+    def edit_group_handler(call: CallbackQuery):
+        groups.edit_group(call, send_message_once, bot)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "delete_group")
+    @prevent_duplicate_callback
+    def delete_group_prompt_handler(call: CallbackQuery):
+        groups.delete_group_prompt(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("delete_group_"))
+    @prevent_duplicate_callback
+    def delete_group_confirm_handler(call: CallbackQuery):
+        groups.delete_group_confirm(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete_group_"))
+    @prevent_duplicate_callback
+    def delete_group_handler(call: CallbackQuery):
+        groups.delete_group(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "cancel_delete_group")
+    @prevent_duplicate_callback
+    def cancel_delete_group_handler(call: CallbackQuery):
+        groups.cancel_delete_group(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "edit_member")
+    @prevent_duplicate_callback
+    def edit_member_prompt_handler(call: CallbackQuery):
+        groups.edit_member_prompt(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("edit_member_group_"))
+    @prevent_duplicate_callback
+    def select_member_to_edit_handler(call: CallbackQuery):
+        groups.select_member_to_edit(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("edit_member_"))
+    @prevent_duplicate_callback
+    def edit_member_handler(call: CallbackQuery):
+        groups.edit_member(call, send_message_once, bot)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "delete_member")
+    @prevent_duplicate_callback
+    def delete_member_prompt_handler(call: CallbackQuery):
+        groups.delete_member_prompt(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("delete_member_group_"))
+    @prevent_duplicate_callback
+    def select_member_to_delete_handler(call: CallbackQuery):
+        groups.select_member_to_delete(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("delete_member_"))
+    @prevent_duplicate_callback
+    def delete_member_confirm_handler(call: CallbackQuery):
+        groups.delete_member_confirm(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete_member_"))
+    @prevent_duplicate_callback
+    def delete_member_handler(call: CallbackQuery):
+        groups.delete_member(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "cancel_delete_member")
+    @prevent_duplicate_callback
+    def cancel_delete_member_handler(call: CallbackQuery):
+        groups.cancel_delete_member(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "edit_own_group")
+    @prevent_duplicate_callback
+    def edit_own_group_handler(call: CallbackQuery):
+        groups.edit_group_prompt(call, send_message_once)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "delete_own_group")
+    @prevent_duplicate_callback
+    def delete_own_group_handler(call: CallbackQuery):
+        groups.delete_group_prompt(call, send_message_once)
 
     # Handle lecture and assignment steps
     @bot.message_handler(func=lambda message: True, content_types=['text', 'document'])

@@ -10,7 +10,18 @@ processed_items = {}
 def is_admin(user_id: int) -> bool:
     with Session(engine) as session:
         user = session.exec(select(User).where(User.telegram_id == user_id)).first()
-        return user.is_admin if user else False
+        if user.is_admin == True:
+            return True
+        else:
+            return False
+
+def is_admin_local(user_id: int) -> bool:
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.telegram_id == user_id)).first()
+        if user.is_admin == True:
+            return True
+        else:
+            return False
 
 def get_or_create_user(telegram_id: int) -> User:
     with Session(engine) as session:
@@ -50,4 +61,18 @@ def safe_register_next_step(bot: TeleBot, message: Message, handler, function_na
         bot.register_next_step_handler(message, handler)
     else:
         print(f"Warning: Invalid next step handler for message {message.message_id} in function {function_name}")
-        
+
+def get_or_create_user(telegram_id: int, name: str = None) -> User:
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.telegram_id == telegram_id)).first()
+        if not user:
+            user = User(telegram_id=telegram_id, name=name or f"User_{telegram_id}")
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        elif name and user.name != name:
+            user.name = name
+            session.commit()
+            session.refresh(user)
+        return user
+    

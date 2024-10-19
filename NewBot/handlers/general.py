@@ -2,7 +2,7 @@
 from telebot import types
 from utils import is_admin, get_or_create_user
 from texts import (
-    WELCOME_MESSAGE, LECTURES_BUTTON, ASSIGNMENTS_BUTTON,
+    GROUPS_BUTTON, WELCOME_MESSAGE, LECTURES_BUTTON, ASSIGNMENTS_BUTTON,
     SUBJECTS_BUTTON, HELP_BUTTON, ADMIN_BUTTON, PDF_UTILS_BUTTON
 )
 
@@ -15,6 +15,7 @@ def start(message, send_message_once):
         types.KeyboardButton(ASSIGNMENTS_BUTTON),
         types.KeyboardButton(SUBJECTS_BUTTON),
         types.KeyboardButton(PDF_UTILS_BUTTON),
+        types.KeyboardButton(GROUPS_BUTTON), 
         types.KeyboardButton(HELP_BUTTON)
     ]
     

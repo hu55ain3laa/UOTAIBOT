@@ -104,7 +104,7 @@ def delete_subject_confirm(call, send_message_once):
         if subject:
             keyboard = types.InlineKeyboardMarkup()
             keyboard.row(
-                types.InlineKeyboardButton("نعم", callback_data=f"confirm_delete_{subject_id}"),
+                types.InlineKeyboardButton("نعم", callback_data=f"confirm_delete1_{subject_id}"),
                 types.InlineKeyboardButton("لا", callback_data="cancel_delete")
             )
             send_message_once(call.message.chat.id, CONFIRM_SUBJECT_DELETE.format(subject_name=subject.name), reply_markup=keyboard)
